@@ -68,15 +68,18 @@ contains
         call laplace_core_metrics_zeta(ni, nj, nk, x, y, z, rho_zeta, Aki, Akj, Akk, ierr)
     end subroutine laplace_metrics_zeta_c
 
-    pure subroutine laplace_residual_c(ni, nj, nk, phi, Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, r, ierr) bind(C, name="laplace_residual")
+    pure subroutine laplace_residual_c(ni, nj, nk, phi, y, z, m_in, &
+                                        Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, r, ierr) bind(C, name="laplace_residual")
         integer(ik), intent(in),  value                       :: ni, nj, nk
-        real(rk),    intent(in),  dimension(nj,   nk,   ni)   :: phi
+        real(rk),    intent(in),  dimension(nj,   nk,   ni)   :: phi, y, z
+        real(rk),    intent(in),  value                        :: m_in
         real(rk),    intent(in),  dimension(nj,   nk,   ni-1) :: Aii, Aij, Aik
         real(rk),    intent(in),  dimension(nj-1, nk,   ni)   :: Aji, Ajj, Ajk
         real(rk),    intent(in),  dimension(nj,   nk-1, ni)   :: Aki, Akj, Akk
-        real(rk),    intent(out), dimension(nj-2, nk-2, ni-2) :: r
+        real(rk),    intent(out), dimension(nj,   nk,   ni-1) :: r
         integer(c_int32_t),  intent(out)                   :: ierr
-        call laplace_core_residual(ni, nj, nk, phi, Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, r, ierr)
+        call laplace_core_residual(ni, nj, nk, phi, y, z, m_in, &
+                                    Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, r, ierr)
     end subroutine laplace_residual_c
 
     pure subroutine laplace_density_c(ni, nj, nk, x, y, z, phi, gamma, rho_xi, rho_eta, rho_zeta, ierr) bind(C, name="laplace_density")

@@ -123,8 +123,12 @@ contains
             return
         end if
 
-        allocate(r(nj-2, nk-2, ni-2))
-        call laplace_residual(ni, nj, nk, phi, Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, r, ierr)
+        ! matches README Sec2's m'' = rho*u/(rho_0*a_0); this is the exact mass
+        ! flux the uniform solution itself carries, so the prescribed inlet
+        ! condition is consistent with phi = u*x rather than fighting it
+        allocate(r(nj, nk, ni-1))
+        call laplace_residual(ni, nj, nk, phi, y, z, rho * u, &
+                               Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, r, ierr)
         if (ierr /= 0) then
             write(error_unit, '(A,A,I0)') trim(label), ': laplace_residual failed, ierr=', ierr
             stat = 1
