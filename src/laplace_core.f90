@@ -11,6 +11,7 @@ module laplace_core
     public :: laplace_core_metrics_zeta ! face metrics
     public :: laplace_core_residual     ! discrete residual at interior nodes
     public :: laplace_core_density      ! computes density at faces
+    public :: thomas_solve              ! tridiagonal solve (README Sec7); exposed for direct unit testing only, not wrapped by f_api/c_api
 
 
 contains
@@ -685,5 +686,34 @@ contains
             end do
         end do
     end subroutine laplace_core_density
+
+    pure subroutine thomas_solve(n, sub, diag, sup, rhs, x)
+        !> (PRIVATE) Solves a tridiagonal system of n equations via the Thomas
+        !! algorithm (forward elimination + back substitution). Sub(1) and sup(n)
+        !! are not references -- no sub-diagonal entry on the first row, no
+        !! super-diagonal entry on the last. Generic linear-algebra primitive.
+        integer(ik), intent(in)                :: n
+        real(rk),    intent(in),  dimension(n) :: sub, diag, sup, rhs
+        real(rk),    intent(out), dimension(n) :: x
+
+        real(rk), dimension(n) :: c_prime, d_prime
+        real(rk)               :: m
+        integer(ik)            :: i
+
+        c_prime(1) = sup(1) / diag(1)
+        d_prime(1) = rhs(1) / diag(1)
+
+        do i = 2, n
+            m          = diag(i) - sub(i) * c_prime(i-1)
+            c_prime(i) = sup(i) / m
+            d_prime(i) = (rhs(i) - sub(i) * d_prime(i-1)) / m
+        end do
+
+        x(n) = d_prime(n)
+        do i = n - 1, 1, -1
+            x(i) = d_prime(i) - c_prime(i) * x(i+1)
+        end do
+
+    end subroutine thomas_solve
 
 end module laplace_core
