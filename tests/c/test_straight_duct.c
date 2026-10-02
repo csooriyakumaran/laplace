@@ -79,14 +79,18 @@ static int run_case(Arena* arena, const char* label, f64 M,
     laplace_metrics_zeta(ni, nj, nk, x, y, z, rho_zeta, Aki, Akj, Akk, &ierr);
     if (ierr != 0) { fprintf(stderr, "%s: laplace_metrics_zeta failed, ierr=%d\n", label, ierr); return 1; }
 
-    i64 nri = ni - 2, nrj = nj - 2, nrk = nk - 2;
-    f64* r = arena_push_array(arena, f64, nrj * nrk * nri);
-    laplace_residual(ni, nj, nk, phi, Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, r, &ierr);
+    f64 m_in = rho * u; /* matches README Sec2's m'' = rho*u/(rho_0*a_0); this
+                         * is the exact mass flux the uniform solution itself
+                         * carries, so the prescribed inlet condition is
+                         * consistent with phi = u*x rather than fighting it */
+
+    f64* r = arena_push_array(arena, f64, nj * nk * (ni - 1));
+    laplace_residual(ni, nj, nk, phi, y, z, m_in, Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, r, &ierr);
     if (ierr != 0) { fprintf(stderr, "%s: laplace_residual failed, ierr=%d\n", label, ierr); return 1; }
 
     f64 max_r = 0.0;
     i64 max_idx = 0;
-    for (i64 n = 0; n < nrj * nrk * nri; ++n) {
+    for (i64 n = 0; n < nj * nk * (ni - 1); ++n) {
         f64 a = fabs(r[n]);
         if (a > max_r) { max_r = a; max_idx = n; }
     }

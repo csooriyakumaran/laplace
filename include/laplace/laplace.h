@@ -40,7 +40,7 @@ void laplace_metrics_eta(int64_t ni, int64_t nj, int64_t nk, const double* x, co
 
 void laplace_metrics_zeta(int64_t ni, int64_t nj, int64_t nk, const double* x, const double* y, const double* z, const double* rho, double* Aki, double* Akj, double* Akk, int32_t* ierr);
 
-void laplace_residual(int64_t ni, int64_t nj, int64_t nk, const double* phi, const double* Aii, const double* Aij, const double* Aik, const double* Aji, const double* Ajj, const double* Ajk, const double* Aki, const double* Akj, const double* Akk, double* r, int32_t* ierr);
+void laplace_residual(int64_t ni, int64_t nj, int64_t nk, const double* phi, const double* y, const double* z, const double m_in, const double* Aii, const double* Aij, const double* Aik, const double* Aji, const double* Ajj, const double* Ajk, const double* Aki, const double* Akj, const double* Akk, double* r, int32_t* ierr);
 
 /*
 * Computes the nondimensional density rho/rho_0 at each face (xi, eta, and

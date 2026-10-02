@@ -456,18 +456,128 @@ contains
 
     end subroutine laplace_core_metrics_zeta
 
+    pure function plane_deriv_eta(f, nj, nk, ni, i, j, k) result(d)
+        !> (PRIVATE) Central difference of f w.r.t. eta at a single i-plane,
+        !! one-sided at a j-boundary. No i-averaging -- unlike eta_face_deriv,
+        !! this is for a quantity needed AT a boundary plane itself (e.g. the
+        !! inlet's prescribed mass flux), not at a face straddling two planes.
+        integer(ik), intent(in) :: nj, nk, ni
+        real(rk),    intent(in) :: f(nj, nk, ni)
+        integer(ik), intent(in) :: i, j, k
+        real(rk) :: d
+
+        if (j > 1 .and. j < nj) then
+            d = central_diff(f(j-1, k, i), f(j+1, k, i))
+        else if (j < nj) then
+            d = fwd_diff(f(j, k, i), f(j+1, k, i))
+        else
+            d = bwd_diff(f(j-1, k, i), f(j, k, i))
+        end if
+    end function plane_deriv_eta
+
+    pure function plane_deriv_zeta(f, nj, nk, ni, i, j, k) result(d)
+        !> (PRIVATE) Central difference of f w.r.t. zeta at a single i-plane,
+        !! one-sided at a k-boundary. See plane_deriv_eta.
+        integer(ik), intent(in) :: nj, nk, ni
+        real(rk),    intent(in) :: f(nj, nk, ni)
+        integer(ik), intent(in) :: i, j, k
+        real(rk) :: d
+
+        if (k > 1 .and. k < nk) then
+            d = central_diff(f(j, k-1, i), f(j, k+1, i))
+        else if (k < nk) then
+            d = fwd_diff(f(j, k, i), f(j, k+1, i))
+        else
+            d = bwd_diff(f(j, k-1, i), f(j, k, i))
+        end if
+    end function plane_deriv_zeta
+
+    pure subroutine node_residual(ni, nj, nk, phi, y, z, m_in, Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, i, j, k, r)
+        !> (PRIVATE) Computes the discrete residual (README §5) at a single
+        !! solved node (i,j,k), 1 <= i <= ni-1, full j, full k. Factored out of
+        !! laplace_core_residual so laplace_core_solve can evaluate it one
+        !! line at a time instead of recomputing the whole domain per line.
+        !! See laplace_core_residual for the README §6 boundary conditions.
+        integer(ik), intent(in)                               :: ni, nj, nk
+        real(rk),    intent(in),  dimension(nj,   nk,   ni)   :: phi, y, z
+        real(rk),    intent(in)                               :: m_in
+        real(rk),    intent(in),  dimension(nj,   nk,   ni-1) :: Aii, Aij, Aik
+        real(rk),    intent(in),  dimension(nj-1, nk,   ni)   :: Aji, Ajj, Ajk
+        real(rk),    intent(in),  dimension(nj,   nk-1, ni)   :: Aki, Akj, Akk
+        integer(ik), intent(in)                               :: i, j, k
+        real(rk),    intent(out)                              :: r
+
+        real(rk) :: phi_i, phi_j, phi_k
+        real(rk) :: F_p, F_m, G_p, G_m, H_p, H_m
+
+        call xi_face_deriv(phi, ni, nj, nk, i, j, k, phi_i, phi_j, phi_k)
+        F_p = Aii(j, k, i) * phi_i + Aij(j, k, i) * phi_j + Aik(j, k, i) * phi_k
+
+        if (i > 1) then
+            call xi_face_deriv(phi, ni, nj, nk, i-1, j, k, phi_i, phi_j, phi_k)
+            F_m = Aii(j, k, i-1) * phi_i + Aij(j, k, i-1) * phi_j + Aik(j, k, i-1) * phi_k
+        else
+            F_m = m_in * plane_deriv_eta(y, nj, nk, ni, i, j, k) &
+                       * plane_deriv_zeta(z, nj, nk, ni, i, j, k)
+        end if
+
+        if (j < nj) then
+            call eta_face_deriv(phi, ni, nj, nk, i, j, k, phi_i, phi_j, phi_k)
+            G_p = Aji(j, k, i) * phi_i + Ajj(j, k, i) * phi_j + Ajk(j, k, i) * phi_k
+        else
+            G_p = 0.0_rk
+        end if
+
+        if (j > 1) then
+            call eta_face_deriv(phi, ni, nj, nk, i, j-1, k, phi_i, phi_j, phi_k)
+            G_m = Aji(j-1, k, i) * phi_i + Ajj(j-1, k, i) * phi_j + Ajk(j-1, k, i) * phi_k
+        else
+            G_m = 0.0_rk
+        end if
+
+        if (k < nk) then
+            call zeta_face_deriv(phi, ni, nj, nk, i, j, k, phi_i, phi_j, phi_k)
+            H_p = Aki(j, k, i) * phi_i + Akj(j, k, i) * phi_j + Akk(j, k, i) * phi_k
+        else
+            H_p = 0.0_rk
+        end if
+
+        if (k > 1) then
+            call zeta_face_deriv(phi, ni, nj, nk, i, j, k-1, phi_i, phi_j, phi_k)
+            H_m = Aki(j, k-1, i) * phi_i + Akj(j, k-1, i) * phi_j + Akk(j, k-1, i) * phi_k
+        else
+            H_m = 0.0_rk
+        end if
+
+        r = (F_p - F_m) + (G_p - G_m) + (H_p - H_m)
+
+    end subroutine node_residual
+
     !> *************************************************************************
     !! * laplace_core_residual (PUBLIC)
     !! *
-    !! *   Computes the discrete residual (README §5) at every interior node
-    !! *   from phi and the nine face metric coefficients. Boundary conditions
-    !! *   (README §6) are not yet implemented, so this only covers nodes whose
-    !! *   six bracketing faces are all ordinary interior faces: i = 2..ni-1,
-    !! *   j = 2..nj-1, k = 2..nk-1.
+    !! *   Computes the discrete residual (README §5) at every solved node:
+    !! *   i = 1..ni-1, full j, full k. The outlet plane (i = ni) is Dirichlet
+    !! *   phi = 0 (README §6) -- fixed data, not part of the solved system, so
+    !! *   it has no residual of its own; phi(:,:,ni) is read as ordinary known
+    !! *   data by the i = ni-1 nodes' F_p.
+    !! *
+    !! *   Boundary conditions (README §6) folded in directly:
+    !! *     - symmetry (j=1, k=1) / wall (j=nj, k=nk): the missing-neighbour
+    !! *       face's flux is omitted entirely (zero), not substituted
+    !! *     - inlet (i=1): F_m is the prescribed constant mass flux
+    !! *       m_in * y_eta * z_zeta, evaluated at the inlet plane directly
+    !! *       (not a face average -- there is no i=0 plane to average with)
     !! *
     !! *   @param ni, nj, nk              Grid dimensions
     !! *
     !! *   @param phi                     Potential field (nj, nk, ni)
+    !! *
+    !! *   @param y, z                    Node coordinates (nj, nk, ni); needed
+    !! *                                  only for the inlet's geometric term
+    !! *
+    !! *   @param m_in                    Prescribed nondimensional inlet mass
+    !! *                                  flux, rho*u/(rho_0*a_0) (README §2)
     !! *
     !! *   @param Aii, Aij, Aik           Metrics at xi-faces (nj, nk, ni-1),
     !! *                                  from laplace_core_metrics_xi
@@ -478,58 +588,39 @@ contains
     !! *   @param Aki, Akj, Akk           Metrics at zeta-faces (nj, nk-1, ni),
     !! *                                  from laplace_core_metrics_zeta
     !! *
-    !! *   @param r                       Residual at each interior node
-    !! *                                  (nj-2, nk-2, ni-2); r(jj,kk,ii) is the
-    !! *                                  residual at node (ii+1, jj+1, kk+1)
+    !! *   @param r                       Residual at each solved node
+    !! *                                  (nj, nk, ni-1); r(j,k,i) is the
+    !! *                                  residual at node (i,j,k) -- no index
+    !! *                                  offset, unlike the interior-only version
     !! *
-    !! *   @param ierr                    0 = OK; -1 = grid too small to have
-    !! *                                  any interior node (ni, nj or nk < 3)
+    !! *   @param ierr                    0 = OK; -1 = ni, nj or nk < 2
     !! *
     !! ************************************************************************/
-    pure subroutine laplace_core_residual(ni, nj, nk, phi, Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, r, ierr)
+    pure subroutine laplace_core_residual(ni, nj, nk, phi, y, z, m_in, Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, r, ierr)
         integer(ik), intent(in)                               :: ni, nj, nk
-        real(rk),    intent(in),  dimension(nj,   nk,   ni)   :: phi
+        real(rk),    intent(in),  dimension(nj,   nk,   ni)   :: phi, y, z
+        real(rk),    intent(in)                               :: m_in
         real(rk),    intent(in),  dimension(nj,   nk,   ni-1) :: Aii, Aij, Aik
         real(rk),    intent(in),  dimension(nj-1, nk,   ni)   :: Aji, Ajj, Ajk
         real(rk),    intent(in),  dimension(nj,   nk-1, ni)   :: Aki, Akj, Akk
-        real(rk),    intent(out), dimension(nj-2, nk-2, ni-2) :: r
+        real(rk),    intent(out), dimension(nj,   nk,   ni-1) :: r
         integer,     intent(out)                              :: ierr
 
         integer(ik) :: i, j, k
-        real(rk)    :: phi_i, phi_j, phi_k
-        real(rk)    :: F_p, F_m, G_p, G_m, H_p, H_m
 
         ierr = 0
 
-        if (ni < 3 .or. nj < 3 .or. nk < 3) then
+        if (ni < 2 .or. nj < 2 .or. nk < 2) then
             ierr = -1
             return
         end if
 
-        do i = 2, ni - 1
-            do k = 2, nk - 1
-                do j = 2, nj - 1
-
-                    call xi_face_deriv(phi, ni, nj, nk, i, j, k, phi_i, phi_j, phi_k)
-                    F_p = Aii(j, k, i) * phi_i + Aij(j, k, i) * phi_j + Aik(j, k, i) * phi_k
-
-                    call xi_face_deriv(phi, ni, nj, nk, i-1, j, k, phi_i, phi_j, phi_k)
-                    F_m = Aii(j, k, i-1) * phi_i + Aij(j, k, i-1) * phi_j + Aik(j, k, i-1) * phi_k
-
-                    call eta_face_deriv(phi, ni, nj, nk, i, j, k, phi_i, phi_j, phi_k)
-                    G_p = Aji(j, k, i) * phi_i + Ajj(j, k, i) * phi_j + Ajk(j, k, i) * phi_k
-
-                    call eta_face_deriv(phi, ni, nj, nk, i, j-1, k, phi_i, phi_j, phi_k)
-                    G_m = Aji(j-1, k, i) * phi_i + Ajj(j-1, k, i) * phi_j + Ajk(j-1, k, i) * phi_k
-
-                    call zeta_face_deriv(phi, ni, nj, nk, i, j, k, phi_i, phi_j, phi_k)
-                    H_p = Aki(j, k, i) * phi_i + Akj(j, k, i) * phi_j + Akk(j, k, i) * phi_k
-
-                    call zeta_face_deriv(phi, ni, nj, nk, i, j, k-1, phi_i, phi_j, phi_k)
-                    H_m = Aki(j, k-1, i) * phi_i + Akj(j, k-1, i) * phi_j + Akk(j, k-1, i) * phi_k
-
-                    r(j-1, k-1, i-1) = (F_p - F_m) + (G_p - G_m) + (H_p - H_m)
-
+        do i = 1, ni - 1
+            do k = 1, nk
+                do j = 1, nj
+                    call node_residual(ni, nj, nk, phi, y, z, m_in, &
+                                        Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, &
+                                        i, j, k, r(j, k, i))
                 end do
             end do
         end do
