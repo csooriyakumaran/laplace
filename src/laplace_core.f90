@@ -10,6 +10,7 @@ module laplace_core
     public :: laplace_core_metrics_eta  ! face metrics
     public :: laplace_core_metrics_zeta ! face metrics
     public :: laplace_core_residual     ! discrete residual at interior nodes
+    public :: laplace_core_density      ! computes density at faces
 
 
 contains
@@ -63,7 +64,7 @@ contains
     !! *
     !! *   @param ierr          0 = OK; -1 = invalid beta; -2 = non-monotonic xs
     !! *
-    !! *******************************************************************************/
+   !! *******************************************************************************/
     pure subroutine laplace_core_grid(ni, nj, nk, xs, hs, bs, beta_j, beta_k, x, y, z, ierr)
         integer(ik), intent(in)                         :: ni, nj, nk
         real(rk),    intent(in),  dimension(ni)         :: xs, hs, bs
@@ -533,5 +534,156 @@ contains
         end do
 
     end subroutine laplace_core_residual
+
+    pure subroutine physical_velocity(x_xi, y_xi, y_eta, z_xi, z_zeta, phi_xi, phi_eta, phi_zeta, u, v, w)
+        !> (PRIVATE) Physical velocity from phi's derivatives and the raw metric
+        !! terms. Works at any location -- a face (for density closure), or node (for output).
+        real(rk), intent(in)  :: x_xi, y_xi, y_eta, z_xi, z_zeta
+        real(rk), intent(in)  :: phi_xi, phi_eta, phi_zeta
+        real(rk), intent(out) :: u, v, w
+
+        u = phi_xi   / x_xi - (y_xi / (x_xi * y_eta)) * phi_eta - (z_xi / (x_xi * z_zeta)) * phi_zeta
+        v = phi_eta  / y_eta
+        w = phi_zeta / z_zeta
+    end subroutine physical_velocity
+
+    !> *************************************************************************
+    !! * laplace_core_density (PUBLIC)
+    !! *
+    !! *   Computes the nondimensional density rho/rho_0 (README Sec1, Sec2) at
+    !! *   each xi-, eta-, and zeta-face from the current phi and the grid, via
+    !! *   the physical velocity (README Sec4) and isentropic closure. Mirrors
+    !! *   metrics_xi/eta/zeta's own face-gathering, re-deriving the same raw
+    !! *   metric terms rather than threading them through from metrics.
+    !! *
+    !! *   @param ni, nj, nk              Grid dimensions (streamwise, vertical, spanwise)
+    !! *
+    !! *   @param x, y, z                 Node coordinates (nj, nk, ni)
+    !! *
+    !! *   @param phi                     Potential field (nj, nk, ni)
+    !! *
+    !! *   @param gamma                   Ratio of specific heats (> 1)
+    !! *
+    !! *   @param rho_xi                  Density at each xi-face (nj, nk, ni-1)
+    !! *
+    !! *   @param rho_eta                 Density at each eta-face (nj-1, nk, ni)
+    !! *
+    !! *   @param rho_zeta                Density at each zeta-face (nj, nk-1, ni)
+    !! *
+    !! *   @param ierr                    0 = OK; -1 = degenerate grid
+    !! *                                  (x_xi, y_eta or z_zeta <= 0); -2 =
+    !! *                                  sonic limit reached (q^2 >= 2/(gamma+1));
+    !! *                                  -3 = invalid gamma (<= 1)
+    !! *
+    !! ************************************************************************/
+    pure subroutine laplace_core_density(ni, nj, nk, x, y, z, phi, gamma, rho_xi, rho_eta, rho_zeta, ierr)
+        integer(ik), intent(in)                             :: ni, nj, nk
+        real(rk),    intent(in),  dimension(nj, nk, ni)     :: x, y, z, phi
+        real(rk),    intent(in)                             :: gamma
+        real(rk),    intent(out), dimension(nj,   nk, ni-1) :: rho_xi
+        real(rk),    intent(out), dimension(nj-1, nk,   ni) :: rho_eta
+        real(rk),    intent(out), dimension(nj,   nk-1, ni) :: rho_zeta
+        integer,     intent(out)                            :: ierr
+
+        integer(ik) :: i, j, k
+        real(rk)    :: x_xi, x_eta, x_zeta
+        real(rk)    :: y_xi, y_eta, y_zeta
+        real(rk)    :: z_xi, z_eta, z_zeta
+        real(rk)    :: phi_xi, phi_eta, phi_zeta
+        real(rk)    :: u, v, w, q2, a2, q2_sonic
+
+        ierr = 0
+
+        if (gamma <= 1.0_rk) then
+            ierr = -3
+            return
+        end if
+
+        q2_sonic = 2.0_rk / (gamma + 1.0_rk)
+
+        ! xi-faces
+        do i = 1, ni - 1
+            do k = 1, nk
+                do j = 1, nj
+                    call xi_face_deriv(x,   ni, nj, nk, i, j, k, x_xi, x_eta, x_zeta)
+                    call xi_face_deriv(y,   ni, nj, nk, i, j, k, y_xi, y_eta, y_zeta)
+                    call xi_face_deriv(z,   ni, nj, nk, i, j, k, z_xi, z_eta, z_zeta)
+                    call xi_face_deriv(phi, ni, nj, nk, i, j, k, phi_xi, phi_eta, phi_zeta)
+
+                    if (x_xi <= 0.0_rk .or. y_eta <= 0.0_rk .or. z_zeta <= 0.0_rk) then
+                        ierr = -1
+                        return
+                    end if
+
+                    call physical_velocity(x_xi, y_xi, y_eta, z_xi, z_zeta, phi_xi, phi_eta, phi_zeta, u, v, w)
+
+                    q2 = u*u + v*v + w*w
+                    if (q2 >= q2_sonic) then
+                        ierr = -2
+                        return
+                    end if
+
+                    a2 = 1.0_rk - 0.5_rk * (gamma - 1.0_rk) * q2
+                    rho_xi(j, k, i) = a2 ** (1.0_rk / (gamma - 1.0_rk))
+                end do
+            end do
+        end do
+
+        ! eta-faces
+        do i = 1, ni
+            do k = 1, nk
+                do j = 1, nj - 1
+                    call eta_face_deriv(x,   ni, nj, nk, i, j, k, x_xi, x_eta, x_zeta)
+                    call eta_face_deriv(y,   ni, nj, nk, i, j, k, y_xi, y_eta, y_zeta)
+                    call eta_face_deriv(z,   ni, nj, nk, i, j, k, z_xi, z_eta, z_zeta)
+                    call eta_face_deriv(phi, ni, nj, nk, i, j, k, phi_xi, phi_eta, phi_zeta)
+
+                    if (x_xi <= 0.0_rk .or. y_eta <= 0.0_rk .or. z_zeta <= 0.0_rk) then
+                        ierr = -1
+                        return
+                    end if
+
+                    call physical_velocity(x_xi, y_xi, y_eta, z_xi, z_zeta, phi_xi, phi_eta, phi_zeta, u, v, w)
+
+                    q2 = u*u + v*v + w*w
+                    if (q2 >= q2_sonic) then
+                        ierr = -2
+                        return
+                    end if
+
+                    a2 = 1.0_rk - 0.5_rk * (gamma - 1.0_rk) * q2
+                    rho_eta(j, k, i) = a2 ** (1.0_rk / (gamma - 1.0_rk))
+                end do
+            end do
+        end do
+
+        ! zeta-faces
+        do i = 1, ni
+            do k = 1, nk - 1
+                do j = 1, nj
+                    call zeta_face_deriv(x,   ni, nj, nk, i, j, k, x_xi, x_eta, x_zeta)
+                    call zeta_face_deriv(y,   ni, nj, nk, i, j, k, y_xi, y_eta, y_zeta)
+                    call zeta_face_deriv(z,   ni, nj, nk, i, j, k, z_xi, z_eta, z_zeta)
+                    call zeta_face_deriv(phi, ni, nj, nk, i, j, k, phi_xi, phi_eta, phi_zeta)
+
+                    if (x_xi <= 0.0_rk .or. y_eta <= 0.0_rk .or. z_zeta <= 0.0_rk) then
+                        ierr = -1
+                        return
+                    end if
+
+                    call physical_velocity(x_xi, y_xi, y_eta, z_xi, z_zeta, phi_xi, phi_eta, phi_zeta, u, v, w)
+
+                    q2 = u*u + v*v + w*w
+                    if (q2 >= q2_sonic) then
+                        ierr = -2
+                        return
+                    end if
+
+                    a2 = 1.0_rk - 0.5_rk * (gamma - 1.0_rk) * q2
+                    rho_zeta(j, k, i) = a2 ** (1.0_rk / (gamma - 1.0_rk))
+                end do
+            end do
+        end do
+    end subroutine laplace_core_density
 
 end module laplace_core

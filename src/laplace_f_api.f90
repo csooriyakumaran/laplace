@@ -7,6 +7,7 @@ module laplace_f_api
     use :: laplace_core,  only : laplace_core_metrics_eta
     use :: laplace_core,  only : laplace_core_metrics_zeta
     use :: laplace_core,  only : laplace_core_residual
+    use :: laplace_core,  only : laplace_core_density
 
     implicit none
 
@@ -18,6 +19,7 @@ module laplace_f_api
     public :: laplace_metrics_eta
     public :: laplace_metrics_zeta
     public :: laplace_residual
+    public :: laplace_density
 
 contains
 
@@ -27,7 +29,6 @@ contains
         real(rk),    intent(out), dimension(n) :: y
         call laplace_core_kernel(n, x, y)
     end subroutine laplace_kernel
-
 
     pure subroutine laplace_grid(ni, nj, nk, xs, hs, bs, beta_j, beta_k, x, y, z, ierr)
         integer(ik), intent(in)                         :: ni, nj, nk
@@ -75,5 +76,16 @@ contains
         integer,     intent(out)                              :: ierr
         call laplace_core_residual(ni, nj, nk, phi, Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, r, ierr)
     end subroutine laplace_residual
+
+    pure subroutine laplace_density(ni, nj, nk, x, y, z, phi, gamma, rho_xi, rho_eta, rho_zeta, ierr)
+        integer(ik), intent(in)                             :: ni, nj, nk
+        real(rk),    intent(in),  dimension(nj, nk, ni)     :: x, y, z, phi
+        real(rk),    intent(in)                             :: gamma
+        real(rk),    intent(out), dimension(nj,   nk, ni-1) :: rho_xi
+        real(rk),    intent(out), dimension(nj-1, nk,   ni) :: rho_eta
+        real(rk),    intent(out), dimension(nj,   nk-1, ni) :: rho_zeta
+        integer,     intent(out)                            :: ierr
+        call laplace_core_density(ni, nj, nk, x, y, z, phi, gamma, rho_xi, rho_eta, rho_zeta, ierr)
+    end subroutine laplace_density
 
 end module laplace_f_api
