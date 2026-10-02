@@ -85,3 +85,13 @@ target_link_libraries(test_straight_duct_f
 )
 
 add_test(NAME straight_duct_fortran COMMAND test_straight_duct_f)
+
+add_executable(test_thomas_solve
+    tests/fortran/test_thomas_solve.f90
+)
+
+target_link_libraries(test_thomas_solve
+    PRIVATE laplacelib
+)
+
+add_test(NAME thomas_solve COMMAND test_thomas_solve)
