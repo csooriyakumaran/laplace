@@ -7,6 +7,7 @@ module laplace_c_api
     use            :: laplace_core,  only : laplace_core_metrics_eta
     use            :: laplace_core,  only : laplace_core_metrics_zeta
     use            :: laplace_core,  only : laplace_core_residual
+    use            :: laplace_core,  only : laplace_core_density
 
     ! add use statement for all public api functions
 
@@ -20,6 +21,7 @@ module laplace_c_api
     public :: laplace_metrics_eta_c
     public :: laplace_metrics_zeta_c
     public :: laplace_residual_c
+    public :: laplace_density_c
 
 contains
 
@@ -76,5 +78,16 @@ contains
         integer(c_int32_t),  intent(out)                   :: ierr
         call laplace_core_residual(ni, nj, nk, phi, Aii, Aij, Aik, Aji, Ajj, Ajk, Aki, Akj, Akk, r, ierr)
     end subroutine laplace_residual_c
+
+    pure subroutine laplace_density_c(ni, nj, nk, x, y, z, phi, gamma, rho_xi, rho_eta, rho_zeta, ierr) bind(C, name="laplace_density")
+        integer(ik), intent(in),  value                     :: ni, nj, nk
+        real(rk),    intent(in),  dimension(nj, nk, ni)     :: x, y, z, phi
+        real(rk),    intent(in),  value                     :: gamma
+        real(rk),    intent(out), dimension(nj,   nk, ni-1) :: rho_xi
+        real(rk),    intent(out), dimension(nj-1, nk,   ni) :: rho_eta
+        real(rk),    intent(out), dimension(nj,   nk-1, ni) :: rho_zeta
+        integer(c_int32_t), intent(out)                     :: ierr
+        call laplace_core_density(ni, nj, nk, x, y, z, phi, gamma, rho_xi, rho_eta, rho_zeta, ierr)
+    end subroutine laplace_density_c
 
 end module laplace_c_api
