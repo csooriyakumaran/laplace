@@ -8,6 +8,8 @@ module laplace_c_api
     use            :: laplace_core,  only : laplace_core_metrics_zeta
     use            :: laplace_core,  only : laplace_core_residual
     use            :: laplace_core,  only : laplace_core_density
+    use            :: laplace_core,  only : laplace_core_solve
+    use            :: laplace_core,  only : laplace_core_output
 
     ! add use statement for all public api functions
 
@@ -22,6 +24,8 @@ module laplace_c_api
     public :: laplace_metrics_zeta_c
     public :: laplace_residual_c
     public :: laplace_density_c
+    public :: laplace_solve_c
+    public :: laplace_output_c
 
 contains
 
@@ -92,5 +96,38 @@ contains
         integer(c_int32_t), intent(out)                     :: ierr
         call laplace_core_density(ni, nj, nk, x, y, z, phi, gamma, rho_xi, rho_eta, rho_zeta, ierr)
     end subroutine laplace_density_c
+
+    pure subroutine laplace_solve_c(ni, nj, nk, x, y, z, phi, m_in, gamma, &
+                                     omega, omega_rho, density_update_stride, &
+                                     max_iter, tol, &
+                                     n_iter_done, ierr, &
+                                     progress_iter, max_r_history, rms_r_history, stop_flag) &
+            bind(C, name="laplace_solve")
+        integer(ik), intent(in),    value                          :: ni, nj, nk
+        real(rk),    intent(in),    dimension(nj, nk, ni)          :: x, y, z
+        real(rk),    intent(inout), dimension(nj, nk, ni)          :: phi
+        real(rk),    intent(in),    value                          :: m_in, gamma, omega, omega_rho, tol
+        integer(ik), intent(in),    value                          :: density_update_stride, max_iter
+        integer(ik), intent(out)                                   :: n_iter_done
+        integer(c_int32_t), intent(out)                            :: ierr
+        integer(ik), intent(inout), optional                       :: progress_iter
+        real(rk),    intent(inout), optional, dimension(max_iter)  :: max_r_history, rms_r_history
+        integer(ik), intent(in),    optional                       :: stop_flag
+        call laplace_core_solve(ni, nj, nk, x, y, z, phi, m_in, gamma, &
+                                 omega, omega_rho, density_update_stride, &
+                                 max_iter, tol, &
+                                 n_iter_done, ierr, &
+                                 progress_iter, max_r_history, rms_r_history, stop_flag)
+    end subroutine laplace_solve_c
+
+    pure subroutine laplace_output_c(ni, nj, nk, x, y, z, phi, gamma, u, v, w, rho, p, t, mach, ierr) &
+            bind(C, name="laplace_output")
+        integer(ik), intent(in),  value                 :: ni, nj, nk
+        real(rk),    intent(in),  dimension(nj, nk, ni) :: x, y, z, phi
+        real(rk),    intent(in),  value                 :: gamma
+        real(rk),    intent(out), dimension(nj, nk, ni) :: u, v, w, rho, p, t, mach
+        integer(c_int32_t), intent(out)                 :: ierr
+        call laplace_core_output(ni, nj, nk, x, y, z, phi, gamma, u, v, w, rho, p, t, mach, ierr)
+    end subroutine laplace_output_c
 
 end module laplace_c_api

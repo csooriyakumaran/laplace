@@ -1,5 +1,7 @@
 build/
 .venv/
+__pycache/
+data/
 *.o
 *.obj
 *.mod
