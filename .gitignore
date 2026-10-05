@@ -1,6 +1,6 @@
 build/
 .venv/
-__pycache/
+__pycache__/
 data/
 *.o
 *.obj
