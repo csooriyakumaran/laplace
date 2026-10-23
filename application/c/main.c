@@ -3,37 +3,12 @@
 
 #include "laplace/laplace.h"
 
+#include "args.h"
+
 #include <math.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 #define VERSION_STRING "v0.0.1"
-
-typedef enum { OPT_FLAG, OPT_U16, OPT_U32, OPT_F64, OPT_STR } OptKind;
-
-typedef struct OptSpec
-{
-    str8    name;
-    str8    alias;
-    OptKind kind;
-    void*   out;
-    str8    metavar;
-    str8    help;
-    b8      positional;
-} OptSpec;
-
-static inline OptSpec* find_opt(OptSpec* opts, u64 count, str8 key)
-{
-    if (!opts) return NULL;
-
-    for (u64 i = 0; i < count; ++i)
-    {
-        if (str8_eq(opts[i].name, key)) return &opts[i];
-        if (str8_eq(opts[i].alias, key) && opts[i].alias.size) return &opts[i];
-    }
-
-    return NULL;
-}
 
 typedef struct Args
 {
@@ -50,59 +25,6 @@ typedef struct Args
     str8 coords_path;
     str8 output_path;
 } Args;
-
-static void print_help(OptSpec* opts, u64 count)
-{
-
-    printf("\nUSAGE\n");
-    printf("  laplace.exe");
-    for (u64 i = 0; i < count; ++i)
-    {
-        const OptSpec* o = &opts[i];
-        if (!o->positional) continue;
-        printf(" <" STR8_FMT ">", STR8_ARG(o->name));
-    }
-    for (u64 i = 0; i < count; ++i)
-    {
-        const OptSpec* o = &opts[i];
-         if (o->positional) continue;
-        printf(" [");
-        printf(STR8_FMT, STR8_ARG(o->name));
-        if (o->kind != OPT_FLAG) printf(" <" STR8_FMT ">", STR8_ARG(o->metavar));
-        printf("]");
-    }
-    printf("\n");
-
-    printf("\nARGUMENTS\n");
-    for (u64 i = 0; i < count; ++i)
-    {
-        const OptSpec* o = &opts[i];
-        if (!o->positional) continue;
-        printf(" " STR8_FMT "\t\t" STR8_FMT " \n", STR8_ARG(o->name), STR8_ARG(o->help));
-    }
-
-    printf("\nFLAGS\n");
-    for (u64 i = 0; i < count; ++i)
-    {
-        const OptSpec* o = &opts[i];
-        if (o->positional || o->kind != OPT_FLAG) continue;
-        if (o->alias.size > 0) printf(" " STR8_FMT ", ", STR8_ARG(o->alias));
-        else                   printf("     ");
-        printf(STR8_FMT "\t\t" STR8_FMT "\n",
-               STR8_ARG(o->name), STR8_ARG(o->help));
-    }
-
-    printf("\nOPTIONS\n");
-    for (u64 i = 0; i < count; ++i)
-    {
-        const OptSpec* o = &opts[i];
-        if (o->positional || o->kind == OPT_FLAG) continue;
-        if (o->alias.size > 0) printf(" " STR8_FMT ", ", STR8_ARG(o->alias));
-        else                   printf("     ");
-        printf(STR8_FMT " <" STR8_FMT ">\t" STR8_FMT "\n",
-               STR8_ARG(o->name), STR8_ARG(o->metavar), STR8_ARG(o->help));
-    }
-}
 
 static inline void print_version(void)
 {
@@ -130,6 +52,7 @@ static inline Args default_args(void)
 static void print_args(Args* args)
 {
     fprintf(stdout, "Arguments:\n");
+    fprintf(stdout, "------------------------------------\n");
     fprintf(stdout, "  Mach:   %.2f\n", args->M);
     fprintf(stdout, "  Po:     %.2f Pa\n", args->Po);
     fprintf(stdout, "  To:     %.2f K\n", args->To);
@@ -140,288 +63,426 @@ static void print_args(Args* args)
     fprintf(stdout, "  tol:    %.2e\n", args->tolerance);
     fprintf(stdout, "  coords: " STR8_FMT "\n", STR8_ARG(args->coords_path));
     fprintf(stdout, "  output: " STR8_FMT "\n", STR8_ARG(args->output_path));
+    fprintf(stdout, "------------------------------------\n");
 }
 
-static inline b8 parse_args(int argc, char** argv, Args* a, OptSpec* opts, u64 count)
+static void print_geom(const f64* xs, const f64* hs, const f64* bs, const i64 ni)
+{
+    fprintf(stdout, "Contraction Geometry:\n");
+    fprintf(stdout, "------------------------------------\n");
+    fprintf(stdout, "  ni:     %lld\n",   (long long)ni);
+    fprintf(stdout, "  A-in:   %.2f m2\n", hs[0]*bs[0]/(1000*1000));
+    fprintf(stdout, "  A-out:  %.2f m2\n", hs[ni-1]*bs[ni-1]/(1000*1000));
+    fprintf(stdout, "  CR:     %.2f\n",    hs[0]*bs[0]/hs[ni-1]/bs[ni-1]);
+    fprintf(stdout, "  L:      %.2f m\n",  (xs[ni-1] - xs[0])/1000);
+    fprintf(stdout, "------------------------------------\n");
+}
+
+static b8 load_contour_csv(Arena* scratch, const char* path, f64** out_xs, f64** out_hs, f64** out_bs, i64* out_count, str8* err)
 {
 
-    u64 next_pos = 0;
+    /* read in file data into scratch arena */
+    bytes raw = file_read(scratch, path);
+    if (!raw.data) { if (err) *err = str8_push_fmt(scratch, "could not read %s", path); return false; }
 
-    for (int i = 1; i < argc; ++i)
+    /* split file data into lines */
+    Str8List lines = str8_split(scratch, (str8){ raw.data, raw.size }, STR("\n"), Str8SplitFlags_SkipEmpty | Str8SplitFlags_Trim);
+    i64 ni = (i64)lines.count - 1; /* excluding header */
+    if (ni <= 0) { if (err) *err = str8_push_fmt(scratch, "expected a header row plus at least one data row\n"); return false; }
+
+    /* allocate output arrays on scratch arena */
+    f64* xs = arena_push_array(scratch, f64, ni);
+    f64* hs = arena_push_array(scratch, f64, ni);
+    f64* bs = arena_push_array(scratch, f64, ni);
+
+    Str8Node* row = lines.first->next; /* skipping header */
+
+    /* parse lines into output arrays */
+    for (i64 i = 0; i < ni; ++i, row = row->next)
     {
-        str8 arg = str8_from_c_str(argv[i]);
+        Str8List fields = str8_split(scratch, row->v, STR(","), Str8SplitFlags_Trim);
+        if (fields.count != 3) { if (err) *err = str8_push_fmt(scratch, "row %lld: expected 3 columns, got %llu", (long long)i, (unsigned long long)fields.count); return false; }
+        Str8Node* f = fields.first;
 
-        /* positional: match the Nth positional-marked OptSpec entry, in table order */
-        if (arg.size == 0 || arg.data[0] != '-')
-        {
-            OptSpec* opt = NULL;
-            for (u64 k = 0, seen = 0; k < count; ++k)
-            {
-                if (!opts[k].positional) continue;
-                if (seen == next_pos) { opt = &opts[k]; break; }
-                ++seen;
-            }
-            if (!opt)
-            {
-                fprintf(stderr, "unexpected positional argument: " STR8_FMT "\n", STR8_ARG(arg));
-                return false;
-            }
-            *(str8*)opt->out = arg;
-            ++next_pos;
-            continue;
-        }
+        if (!str8_to_f64(f->v, &xs[i])) { if (err) *err = str8_push_fmt(scratch, "row %lld: bad x\n", (long long)i); return false; }
+        f = f->next;
 
-        /* keyword: --name / --name=vale / --name vale, matched by name or alias */
-        str8 key, inline_val;
-        b8 has_inline = str8_cut(arg, STR("="), &key, &inline_val);
+        if (!str8_to_f64(f->v, &hs[i])) { if (err) *err = str8_push_fmt(scratch, "row %lld: bad y\n", (long long)i); return false; }
+        f = f->next;
 
-        OptSpec* opt = find_opt(opts, count, key);
-        if (!opt) { fprintf(stderr, "Unrecognized option: " STR8_FMT "\n", STR8_ARG(key)); return false; }
-
-        str8 val = {0};
-
-        if (opt->kind != OPT_FLAG)
-        {
-            if (has_inline) val = inline_val;
-            else if (i + 1 < argc) val = str8_from_c_str(argv[++i]);
-            else { fprintf(stderr, STR8_FMT " requires a value\n", STR8_ARG(key)); return false; }
-        }
-
-        switch (opt->kind)
-        {
-            case OPT_FLAG: *(b8*)opt->out = true; break;
-            case OPT_U16: {
-                u64 v;
-                if (!str8_to_u64(val, &v) || v == 0 || v > U16_MAX) {
-                    fprintf(stderr, STR8_FMT " value must fit in a u16, passed \n" STR8_FMT, STR8_ARG(key), STR8_ARG(val));
-                    return false;
-                }
-                *(u16*)opt->out = (u16)v;
-            } break;
-            case OPT_U32:{
-                u64 v;
-                if (!str8_to_u64(val, &v) || v == 0 || v > U32_MAX) {
-                    fprintf(stderr, STR8_FMT " value must fit in a u32, passed \n" STR8_FMT, STR8_ARG(key), STR8_ARG(val));
-                    return false;
-                }
-                *(u32*)opt->out = (u32)v;
-            } break;
-            case OPT_F64: {
-                f64 v; 
-                if (!str8_to_f64(val, &v))
-                {
-                    fprintf(stderr, STR8_FMT " value must be a valid f64, passed \n" STR8_FMT, STR8_ARG(key), STR8_ARG(val));
-                    return false;
-                }
-                *(f64*)opt->out = v;
-            } break;
-            case OPT_STR: {
-                *(str8*)opt->out = val;
-            } break;
-
-            default: {
-                fprintf(stderr, "Unknown option kind\n");
-                return false;
-            }
-        }
+        if (!str8_to_f64(f->v, &bs[i])) { if (err) *err = str8_push_fmt(scratch, "row %lld: bad x\n", (long long)i); return false; }
     }
 
+    *out_xs = xs; *out_hs = hs; *out_bs = bs; *out_count = ni;
     return true;
+}
+
+static f64 generate_scaled_domian(Arena* perm, const f64* xs_c, const f64* hs_c, const f64* bs_c, i64 ni_c, f64** out_xs, f64** out_hs, f64** out_bs, i64* out_ni)
+{
+    f64 sf     = 1.0 / hs_c[ni_c-1];
+
+    f64 dx_in  = xs_c[1] - xs_c[0];
+    f64 dx_out = xs_c[ni_c - 1] - xs_c[ni_c - 2];
+
+    i64 n_up   = (i64)llround(8.0  * hs_c[0]        / dx_in);  /* extend 4 duct width upstream */
+    i64 n_down = (i64)llround(16.0 * hs_c[ni_c - 1] / dx_out); /* extend 8 duct width downstream */
+
+    i64 ni     = n_up + ni_c + n_down;
+
+    f64* xs    = arena_push_array(perm, f64, ni);
+    f64* hs    = arena_push_array(perm, f64, ni);
+    f64* bs    = arena_push_array(perm, f64, ni);
+
+    for (i64 i = 0; i < n_up; ++i)
+    {
+        xs[i] = sf * xs_c[0] - sf * (f64)(n_up - i) * dx_in ;
+        hs[i] = sf * hs_c[0];
+        bs[i] = sf * bs_c[0];
+    }
+
+    for (i64 i = 0; i < ni_c; ++i)
+    {
+        xs[n_up + i] = sf * xs_c[i];
+        hs[n_up + i] = sf * hs_c[i];
+        bs[n_up + i] = sf * bs_c[i];
+    }
+
+    for (i64 i = 0; i < n_down; ++i)
+    {
+        xs[n_up + ni_c + i] = sf * xs_c[ni_c - 1] + sf * (f64)(i + 1) * dx_out;
+        hs[n_up + ni_c + i] = sf * hs_c[ni_c - 1];
+        bs[n_up + ni_c + i] = sf * bs_c[ni_c - 1];
+    }
+
+    *out_xs = xs;
+    *out_hs = hs;
+    *out_bs = bs;
+    *out_ni = ni;
+    return sf;
+}
+
+/* A/A* = f(M) */
+static f64 area_mach_ratio(f64 mach, f64 gamma)
+{
+    f64 exponent = (gamma + 1.0) / (2.0 * (gamma - 1.0));
+    f64 a2       = 1.0 + 0.5 * (gamma - 1.0) * mach * mach;
+    return (1.0 / mach) * pow( 2.0 * a2 / (gamma + 1.0), exponent);
+}
+
+static f64 subsonic_mach_from_area_ratio(f64 area_ratio, f64 gamma)
+{
+    f64 lo = 1.0e-5, hi = 1.0 - 1.0e-9;
+
+    for (i32 iter = 0; iter < 60; ++iter)
+    {
+        f64 mid = 0.5 * (lo + hi);
+        if (area_mach_ratio(mid, gamma) > area_ratio) lo = mid;
+        else                                     hi = mid;
+    }
+    return 0.5 * (lo + hi);
+
+}
+
+static inline f64 static_temperature(f64 To, f64 M, f64 k) { return To    /    ( 1.0 + 0.5 * (k - 1.0) * M * M); }
+static inline f64 static_pressure(   f64 Po, f64 M, f64 k) { return Po    * pow( 1.0 + 0.5 * (k - 1.0) * M * M, -k   / (k - 1.0) ); }
+static inline f64 static_density( f64 rho_o, f64 M, f64 k) { return rho_o * pow( 1.0 + 0.5 * (k - 1.0) * M * M, -1.0 / (k - 1.0) ); }
+
+
+typedef struct SolveJob
+{
+    i64 ni, nj, nk;
+    const f64 *x, *y, *z;
+    f64* phi;
+    f64 m_in, gamma, omega, omega_rho, tol;
+    i64 density_update_stride, max_iter;
+    f64 *max_r_history, *rms_r_history;
+
+    i64 n_iter_done;
+    i32 ierr;
+    
+    u64 progress_iter;
+    u64 stop_flag;
+    u64 done;
+
+} SolveJob;
+
+static int solve_thread_fn(void* user)
+{
+    SolveJob* job = (SolveJob*)user;
+    laplace_solve(job->ni, job->nj, job->nk, job->x, job->y, job->z, job->phi,
+                  job->m_in, job->gamma, job->omega, job->omega_rho,
+                  job->density_update_stride, job->max_iter, job->tol,
+                  &job->n_iter_done, &job->ierr,
+                  (i64*)&job->progress_iter, job->max_r_history, job->rms_r_history,
+                  (const i64*)&job->stop_flag);
+    atomic_store_rel_u64(&job->done, 1);
+    return 0;
+}
+
+static void on_interrupt(void* user)
+{
+    atomic_store_rel_u64(&((SolveJob*)user)->stop_flag, 1);
 }
 
 int main(int argc, char** argv)
 {
     Args args = default_args();
-    OptSpec opts[] = {
-        { STR("COORDS FILE"), {0},      OPT_STR,  &args.coords_path, {0},        STR("Input wall contour coordinates CSV      (default: coords.csv)"), true},
-        { STR("OUTPUT FILE"), {0},      OPT_STR,  &args.output_path, {0},        STR("Output CSV                              (default: out.csv)"), true},
-        { STR("--help"),    STR("-h"),  OPT_FLAG, &args.help,      {0},          STR("Print help message and exit")},
-        { STR("--version"), STR("-v"),  OPT_FLAG, &args.version,   {0},          STR("Print version number and exit")},
-        { STR("--Mach"),    STR("-M"),  OPT_F64,  &args.M,         STR("VALUE"), STR("Test section Mach number                (default: 0.1)")},
-        { STR("--Po"),      STR("-Po"), OPT_F64,  &args.Po,        STR("VALUE"), STR("Test section stagnation pressure [Pa]   (default: 101235 Pa)")},
-        { STR("--To"),      STR("-To"), OPT_F64,  &args.To,        STR("VALUE"), STR("Test section stagnation temperature [K] (default: 293.15 K)")},
-        { STR("--gamma"),   STR("-k"),  OPT_F64,  &args.gamma,     STR("VALUE"), STR("Ratio of specific heats                 (default: 1.4)")},
-        { STR("--beta"),    STR("-b"),  OPT_F64,  &args.beta,      STR("VALUE"), STR("Wall-node clustering parameter          (default: 1.2)")},
-        { STR("--tol"),     {0},        OPT_F64,  &args.tolerance, STR("VALUE"), STR("Convergence tolerance                   (default: 1e-6)")},
-        { STR("--nj"),      STR("-nj"), OPT_U32,  &args.nj,        STR("VALUE"), STR("No. of nodes in spanwise direction      (default: 15)")},
-        { STR("--nk"),      STR("-nk"), OPT_U32,  &args.nk,        STR("VALUE"), STR("No. of nodes in vertical direction      (default: 15)")},
-    };
+    {   /* --- Parse Command Line Args --- */
+        OptSpec opts[] = {
+            { STR("COORDS FILE"), {0},      OptKind_Str,  &args.coords_path, {0},          STR("Input wall contour coordinates CSV      (default: coords.csv)"), true},
+            { STR("OUTPUT FILE"), {0},      OptKind_Str,  &args.output_path, {0},          STR("Output CSV                              (default: out.csv)"), true},
+            { STR("--help"),    STR("-h"),  OptKind_Flag, &args.help,        {0},          STR("Print help message and exit")},
+            { STR("--version"), STR("-v"),  OptKind_Flag, &args.version,     {0},          STR("Print version number and exit")},
+            { STR("--Mach"),    STR("-M"),  OptKind_F64,  &args.M,           STR("VALUE"), STR("Test section Mach number                (default: 0.1)")},
+            { STR("--Po"),      {0},        OptKind_F64,  &args.Po,          STR("VALUE"), STR("Test section stagnation pressure [Pa]   (default: 101235 Pa)")},
+            { STR("--To"),      {0},        OptKind_F64,  &args.To,          STR("VALUE"), STR("Test section stagnation temperature [K] (default: 293.15 K)")},
+            { STR("--gamma"),   STR("-k"),  OptKind_F64,  &args.gamma,       STR("VALUE"), STR("Ratio of specific heats                 (default: 1.4)")},
+            { STR("--beta"),    STR("-b"),  OptKind_F64,  &args.beta,        STR("VALUE"), STR("Wall-node clustering parameter          (default: 1.2)")},
+            { STR("--tol"),     {0},        OptKind_F64,  &args.tolerance,   STR("VALUE"), STR("Convergence tolerance                   (default: 1e-6)")},
+            { STR("--nj"),      {0},        OptKind_U32,  &args.nj,          STR("VALUE"), STR("No. of nodes in spanwise direction      (default: 15)")},
+            { STR("--nk"),      {0},        OptKind_U32,  &args.nk,          STR("VALUE"), STR("No. of nodes in vertical direction      (default: 15)")},
+        };
 
-    if (!parse_args(argc, argv, &args, opts, ARRAY_COUNT(opts))) return 1;
-    if (args.help)    { print_help(opts, ARRAY_COUNT(opts));    return 0; }
-    if (args.version) { print_version(); return 0; }
+        if (!parse_args(argc, argv, opts, ARRAY_COUNT(opts))) {                                      return 1; }
+        if (args.help)                                        { print_help(opts, ARRAY_COUNT(opts)); return 0; }
+        if (args.version)                                     { print_version();                     return 0; }
+    }
 
     print_args(&args);
 
+    /* --- Memory Managemnt --- */
+    Arena* memory  = arena_alloc(GB(4));  /* permament memory arena for solution variables */
+    Arena* scratch = arena_alloc(GB(4));  /* scratch arena for temporaries -- e.g. when parsing input geometry file, or building the output CSV in memory before a one-shot write */
 
-    f64 mach   = args.M;
-    i64 nj     = (i64)args.nj;
-    i64 nk     = (i64)args.nk;
-    f64 beta_j = args.beta;
-    f64 beta_k = args.beta;
-    f64 gamma  = args.gamma;
+    /* --- Solver Inputs --- */
 
-    Arena* arena = arena_alloc(MB(16));
-    const char* coords_filepath = c_str(arena, args.coords_path);
-    const char* output_filepath = c_str(arena, args.output_path);
+    /* flow props */
+    const f64 M_ts      = args.M;             /* test section mach number */
+    const f64 To        = args.To;            /* stagnation temperature */
+    const f64 Po        = args.Po;            /* stagnation pressure */
+    const f64 gamma     = args.gamma;         /* ratio of specific heats */
+    const f64 R         = 287.05;             /* Gas constant [J/kg-K] */
+    /* grid control */
+    const i64 nj        = (i64)args.nj;       /* number of nodes in lateral spanwise direction */
+    const i64 nk        = (i64)args.nk;       /* number of nodes in vertical spanwise direction */
+    const f64 beta      = args.beta;          /* wall-node clustering parameter */
+    /* solver parameters */
+    const f64 tol       = args.tolerance;
+    const f64 omega     = 1.9;                /* SLOR over-relaxation factor */
+    const f64 omega_rho = 1.0;                /* Density-update under-relaxation factor */
+    const i64 rho_cadence = 10;           /* number of iterations before a density update */
+    const i64 max_iter  = 100000;              /* upper bound */
 
-    bytes file = file_read(arena, coords_filepath);
-    if (!file.data) { fprintf(stderr, "could not read %s", coords_filepath); return 1; }
+    /* output control */
+    const char* coords_filepath = c_str(memory, args.coords_path);
+    const char* output_filepath = c_str(memory, args.output_path);
+    /* ---------------------------------------------------------------------- */
 
-    str8 content = {file.data, file.size};
-    Str8List lines = str8_split(arena, content, STR("\n"), Str8SplitFlags_SkipEmpty | Str8SplitFlags_Trim);
+    f64* xs; /* axial stations */
+    f64* hs; /* half-height of input geometry at each axial station */
+    f64* bs; /* half-width of input geometry at each axial station */
+    i64  ni; /* number of axial stations */
+    f64  sf; /* scale factor */
 
-    if (lines.count < 2) { fprintf(stderr, "expected a header row plus at least one data row\n"); return 1; }
+    {   /* --- Domain Generation --- */
+        ArenaTemp tmp = arena_begin_temp(scratch);
 
-    i64 ni = (i64)lines.count - 1; /* excluding header */
+        f64* xs_c; f64* hs_c; f64* bs_c; i64  ni_c;
+        str8 err = {0};
 
-    f64* xs = arena_push_array(arena, f64, ni);
-    f64* hs = arena_push_array(arena, f64, ni);
-    f64* bs = arena_push_array(arena, f64, ni);
-
-    /* parse the input data */
-    Str8Node* row = lines.first->next; /* skip header */
-    for (i64 i = 0; i < ni; ++i, row = row->next)
-    {
-        Str8List fields = str8_split(arena, row->v, STR(","), Str8SplitFlags_Trim);
-        if (fields.count != 3)
+        /* contraction coords loaded from csv: x, h/2, w/2. */
+        if (!load_contour_csv(scratch, coords_filepath, &xs_c, &hs_c, &bs_c, &ni_c, &err))
         {
-            fprintf(stderr, "row %lld: expected 3 columns, got %llu", (long long)i, (unsigned long long)fields.count);
+            fprintf(stderr, STR8_FMT, STR8_ARG(err));
             return 1;
         }
-        Str8Node* f = fields.first;
-        if (!str8_to_f64(f->v, &xs[i])) { fprintf(stderr, "row %lld: bad xs\n", (long long)i); return 1; }
-        f = f->next;
-    if (!str8_to_f64(f->v, &hs[i])) { fprintf(stderr, "row %lld: bad hs\n", (long long)i); return 1; }
-        f = f->next;
-        if (!str8_to_f64(f->v, &bs[i])) { fprintf(stderr, "row %lld: bad bs\n", (long long)i); return 1; }
+
+        /* report the contraction geometry */
+        print_geom(xs_c, hs_c, bs_c, ni_c);
+
+        /* generate the computational domain: extend inlet outlet, normalize on ts width */
+        sf = generate_scaled_domian(memory, xs_c, hs_c, bs_c, ni_c, &xs, &hs, &bs, &ni);
+
+        arena_end_temp(tmp);
     }
 
-    /* nondimensionalize lengths by the exit (test-section) half-height, per
-     * README Sec2 -- the solver's tolerances/omega were tuned assuming
-     * O(1)-scale lengths, not raw CSV units (e.g. mm) */
-    f64 l_ref = hs[ni - 1];
-    for (i64 i = 0; i < ni; ++i) { xs[i] /= l_ref; hs[i] /= l_ref; bs[i] /= l_ref; }
-    fprintf(stderr, "solving nondimensionally (l_ref=%.6f, exit half-height); output is rescaled back to physical units\n", l_ref);
+    /* Grid coordinates: -- memory layout is j + nj * (k + nk * i) */
+    f64* x = arena_push_array(memory, f64, nj * nk * ni);
+    f64* y = arena_push_array(memory, f64, nj * nk * ni);
+    f64* z = arena_push_array(memory, f64, nj * nk * ni);
 
-    f64* x = arena_push_array(arena, f64, nj * nk * ni);
-    f64* y = arena_push_array(arena, f64, nj * nk * ni);
-    f64* z = arena_push_array(arena, f64, nj * nk * ni);
-
-    i32 ierr = 0;
-
-    /* call into fortran kernel code */
-    laplace_grid(ni, nj, nk, xs, hs, bs, beta_j, beta_k, x, y, z, &ierr);
-    if (ierr != 0) { fprintf(stderr, "laplace_grid faield, ierr=%d\n", ierr); return ierr; }
-
-    /* README Sec2: the caller-supplied Mach number is the TARGET TEST-SECTION
-     * Mach M_ts (the constant-area end -- index ni-1 here), not the inlet's.
-     * m'' at the test section scales to the inlet by the area ratio:
-     * m''_in = m'' * A_ts/A_in. Same isentropic closure as
-     * tests/fortran/test_solve.f90, evaluated at the test section. */
-    f64 a2_ts  = 1.0 / (1.0 + 0.5 * (gamma - 1.0) * mach * mach);
-    f64 u_ts   = mach * sqrt(a2_ts);
-    f64 rho_ts = pow(a2_ts, 1.0 / (gamma - 1.0));
-    f64 mpp_ts = rho_ts * u_ts;
-
-    f64 a_ts = hs[ni - 1] * bs[ni - 1];
-    f64 a_in = hs[0]      * bs[0];
-    f64 m_in = mpp_ts * a_ts / a_in;
-
-    f64* phi = arena_push_array(arena, f64, nj * nk * ni);
-    for (i64 i = 0; i < ni; ++i)
-    {
-        /* u_ts as a crude constant slope is just a starting guess -- SLOR
-         * doesn't need an accurate initial field, only a smooth one */
-        f64 phi_i = u_ts * (xs[i] - xs[ni - 1]); /* 0 at the outlet, matching solve's Dirichlet BC */
-        for (i64 n = 0; n < nj * nk; ++n) phi[n + nj * nk * i] = phi_i;
+    { /* --- Computational Grid --- */
+        i32 ierr = 0;
+        laplace_grid(ni, nj, nk, xs, hs, bs, beta, beta, x, y, z, &ierr);
+        if (ierr != 0) { fprintf(stderr, "laplace_grid faield, ierr=%d\n", ierr); return ierr; }
     }
 
-    /* SLOR/density-update knobs validated against the straight-duct exact
-     * solution in tests/fortran/test_solve.f90; tune max_iter/tol if this
-     * contraction needs more (or converges well before) that budget */
-    const f64 omega     = 1.5;
-    const f64 omega_rho = 1.0;
-    const i64 density_update_stride = 10;
-    const i64 max_iter  = 8000;
-    const f64 tol       = 1.0e-9;
+    /* potential feild */
+    f64* phi = arena_push_array(memory, f64, nj * nk * ni);
 
-    /* laplace_solve is a pure routine now -- no in-loop progress printing.
-     * max_r_history/rms_r_history (1 slot per sweep, caller-allocated) carry
-     * what print_every used to; progress_iter/stop_flag (both NULL here)
-     * are for a caller running this on its own thread, see laplace.h. */
+    { /* --- Initial Conditions --- */
+
+        ArenaTemp tmp = arena_begin_temp(scratch);
+        f64* u_ao     = arena_push_array(scratch, f64, ni);
+        f64* phi_x = arena_push_array(scratch, f64, ni);
+
+        const f64 A_ts     = hs[ni-1] * bs[ni-1]; /* test section area */
+        const f64 ratio_ts = area_mach_ratio(M_ts, gamma);
+
+        /* compute local velocity */
+        for (i64 i = 0; i < ni; ++i)
+        {
+            f64 ratio_i = ratio_ts * ( hs[i] * bs[i] ) / A_ts;
+            f64 M_i     = subsonic_mach_from_area_ratio(ratio_i, gamma);
+            f64 a2_i    = 1.0 / (1.0 + 0.5 * (gamma - 1.0) * M_i * M_i );
+            u_ao[i]     = M_i * sqrt(a2_i);
+        }
+
+        phi_x[ni-1] = 0.0; /* Dirichlet outlet convention */
+
+        /* u = d/dx(phi) as first approx. */
+        for (i64 i = ni - 2; i >= 0; --i)
+            phi_x[i] = phi_x[i+1] - 0.5 * (u_ao[i+1] + u_ao[i]) * (xs[i+1]-xs[i]);
+
+        for (i64 i = 0; i < ni; ++i)
+            for (i64 n = 0; n < nj * nk; ++n)
+                phi[n + nj * nk * i] = phi_x[i];
+
+        /* u and phi_x no longer needed */
+        arena_end_temp(tmp);
+    }
+
     i64 n_iter_done = 0;
-    f64* max_r_history = arena_push_array(arena, f64, max_iter);
-    f64* rms_r_history = arena_push_array(arena, f64, max_iter);
+    f64* max_r_history = arena_push_array(memory, f64, max_iter);
+    f64* rms_r_history = arena_push_array(memory, f64, max_iter);
 
-    laplace_solve(ni, nj, nk, x, y, z, phi, m_in, gamma,
-                   omega, omega_rho, density_update_stride, max_iter, tol,
-                   &n_iter_done, &ierr,
-                   NULL, max_r_history, rms_r_history, NULL);
+    // todo(chris): move this to separate thread
+    {   /* Solver block */
 
-    /* history arrays are 0-indexed in C; sweep n_iter_done's result lives at
-     * n_iter_done - 1 */
-    f64 max_r = (n_iter_done > 0) ? max_r_history[n_iter_done - 1] : 0.0;
-    f64 rms_r = (n_iter_done > 0) ? rms_r_history[n_iter_done - 1] : 0.0;
+        /* mass flux in/out */
+        const f64 A_ts   = hs[ni-1] * bs[ni-1];
+        const f64 A_in   = hs[0]    * bs[0];
 
-    fprintf(stderr, "laplace_solve: n_iter=%lld  max|R|=%.3e  rms|R|=%.3e  ierr=%d\n",
-            (long long)n_iter_done, max_r, rms_r, ierr);
-    if (ierr != 0) { fprintf(stderr, "laplace_solve failed, ierr=%d\n", ierr); return ierr; }
+        const f64 a2_ts  = 1.0 / (1.0 + 0.5 * (gamma - 1.0) * M_ts * M_ts );
+        const f64 u_ts   = M_ts * sqrt(a2_ts); /* u/ao */
+        const f64 rho_ts = pow( a2_ts, 1.0 / (gamma - 1.0) );
+        const f64 m_in   = rho_ts * u_ts * A_ts / A_in;
 
-    /* node-centered velocity/rho/p/T/M (README Sec8) from the converged phi */
-    f64* u_out = arena_push_array(arena, f64, nj * nk * ni);
-    f64* v_out = arena_push_array(arena, f64, nj * nk * ni);
-    f64* w_out = arena_push_array(arena, f64, nj * nk * ni);
-    f64* rho_out = arena_push_array(arena, f64, nj * nk * ni);
-    f64* p_out = arena_push_array(arena, f64, nj * nk * ni);
-    f64* t_out = arena_push_array(arena, f64, nj * nk * ni);
-    f64* mach_out = arena_push_array(arena, f64, nj * nk * ni);
+        SolveJob job = {0};
+        job.ni = ni; job.nj = nj; job.nk = nk;
+        job.x = x; job.y = y; job.z = z; job.phi = phi;
+        job.m_in = m_in; job.gamma = gamma;
+        job.omega = omega; job.omega_rho = omega_rho;
+        job.density_update_stride = rho_cadence;
+        job.max_iter = max_iter; job.tol = tol;
+        job.max_r_history = max_r_history; job.rms_r_history = rms_r_history;
 
-    laplace_output(ni, nj, nk, x, y, z, phi, gamma, u_out, v_out, w_out, rho_out, p_out, t_out, mach_out, &ierr);
-    if (ierr != 0) { fprintf(stderr, "laplace_output failed, ierr=%d\n", ierr); return ierr; }
 
-    /* scale back to physical dimensions (README Sec2) for everything written
-     * out -- the solve itself stays nondimensional throughout (that's what
-     * tol/omega above are tuned against); only the CSV boundary is physical.
-     * Stagnation conditions aren't a CLI input yet, so ISA sea level is
-     * assumed here, same constants as tests/c/test_straight_duct.c. */
-    const f64 r_air = 287.05;
-    const f64 t0_k  = 288.15;
-    const f64 p0_pa = 101325.0;
-    f64 a0   = sqrt(gamma * r_air * t0_k);
-    f64 rho0 = p0_pa / (r_air * t0_k);
+        if (!console_signal_install(on_interrupt, &job))
+            fprintf(stderr, "warning: could not install Ctrl+C handler\n");
 
-    for (i64 n = 0; n < nj * nk * ni; ++n)
-    {
-        x[n] *= l_ref; y[n] *= l_ref; z[n] *= l_ref;
-        phi[n] *= a0 * l_ref; /* phi ~ a_0 * h_ts (README Sec2) */
-        u_out[n] *= a0; v_out[n] *= a0; w_out[n] *= a0;
-        rho_out[n] *= rho0;
-        p_out[n]   *= p0_pa;
-        t_out[n]   *= t0_k;
-        /* mach_out is already dimensionless -- left as-is */
+        Thread t = thread_create(solve_thread_fn, &job);
+        if (!t.handle) { fprintf(stderr, "failed to start solver thread\n"); return 1; }
+
+        u64 last_reported = 0;
+        while (!atomic_load_acq_u64(&job.done))
+        {
+            thread_sleep_ms(20);
+            u64 cur = atomic_load_acq_u64(&job.progress_iter);
+            if (cur - last_reported >= 50)
+            {
+                last_reported = cur - (cur % 50);
+                f64 max_r = max_r_history[last_reported - 1];
+                f64 rms_r = rms_r_history[last_reported - 1];
+                fprintf(stderr, "laplace_solve: iter=%llu  max|R|=%.3e  rms|R|=%.3e\n",
+                        (unsigned long long)last_reported, max_r, rms_r);
+            }
+        }
+
+        int thread_code = 0;
+        thread_join(&t, &thread_code);
+        console_signal_uninstall();
+
+        n_iter_done  = job.n_iter_done;
+        i32 ierr     = job.ierr;
+
+        if (ierr != 0) { fprintf(stderr, "laplace_solve failed, ierr=%d\n", ierr); return ierr; }
+
+        f64 max_r = (n_iter_done > 0) ? max_r_history[n_iter_done - 1] : 0.0;
+        f64 rms_r = (n_iter_done > 0) ? rms_r_history[n_iter_done - 1] : 0.0;
+
+        fprintf(stderr, "laplace_solve: n_iter=%lld  max|R|=%.3e  rms|R|=%.3e  ierr=%d\n",
+                (long long)n_iter_done, max_r, rms_r, ierr);
+
     }
 
-    /* output grid + converged potential + physical output */
-    FILE* out = fopen(output_filepath, "w");
-    fprintf(out, "i,j,k,x,y,z,phi,u,v,w,rho,p,t,mach\n");
+    /* node-centered velocity/rho/p/T/M from the converged phi */
+    f64* u   = arena_push_array(memory, f64, nj * nk * ni);
+    f64* v   = arena_push_array(memory, f64, nj * nk * ni);
+    f64* w   = arena_push_array(memory, f64, nj * nk * ni);
+    f64* rho = arena_push_array(memory, f64, nj * nk * ni);
+    f64* p   = arena_push_array(memory, f64, nj * nk * ni);
+    f64* T   = arena_push_array(memory, f64, nj * nk * ni);
+    f64* M   = arena_push_array(memory, f64, nj * nk * ni);
 
-    for (i64 i = 0; i < ni; ++i)
+    {   /* Report Results */
+        i32 ierr = 0;
+        laplace_output(ni, nj, nk, x, y, z, phi, gamma, u, v, w, rho, p, T, M, &ierr);
+        if (ierr != 0) { fprintf(stderr, "laplace_output failed, ierr=%d\n", ierr); return ierr; }
+
+        f64 a0   = sqrt(gamma * R * To);
+        f64 rho0 = Po / R / To;
+
+        for (i64 n = 0; n < nj * nk * ni; ++n)
+        {
+            x[n]   /= sf; y[n] /= sf; z[n] /= sf;
+            u[n]   *= a0; v[n] *= a0; w[n] *= a0;
+            phi[n] *= a0 / sf; /* phi ~ a_0 * h_ts (README Sec2) */
+            rho[n] *= rho0;
+            p[n]   *= Po;
+            T[n]   *= To;
+        }
+    }
+
+    /* output grid + converged potential + physical output -- streamed row by
+     * row through a small fixed buffer, instead of building the whole CSV in
+     * memory first */
+    fprintf(stdout, "Writing data ...");
+
+    u8 stream_buf[64 * 1024];
+    FileStream fs = file_stream_open(output_filepath, stream_buf, sizeof(stream_buf));
+    if (!file_stream_valid(&fs))
+    {
+        fprintf(stderr, "failed to open %s\n", output_filepath);
+        return 1;
+    }
+
+    file_stream_fmt(&fs, 64, "i,j,k,x,y,z,phi,u,v,w,rho,p,t,mach\n");
+
+    for (i64 i = 0; i < ni && file_stream_ok(&fs); ++i)
     {
         for (i64 k = 0; k < nk; ++k)
         {
             for (i64 j = 0; j < nj; ++j)
             {
                 i64 idx = laplace_idx(i, j, k, nj, nk);
-                fprintf(out, "%lld,%lld,%lld,%.10f,%.10f,%.10f,%.10f,%.10f,%.10f,%.10f,%.10f,%.10f,%.10f,%.10f\n",
-                        (long long)i, (long long)j, (long long)k, x[idx], y[idx], z[idx], phi[idx],
-                        u_out[idx], v_out[idx], w_out[idx], rho_out[idx], p_out[idx], t_out[idx], mach_out[idx]);
+                file_stream_fmt(&fs, 512,
+                    "%lld,%lld,%lld,%.10f,%.10f,%.10f,%.10f,%.10f,%.10f,%.10f,%.10f,%.10f,%.10f,%.10f\n",
+                    (long long)i, (long long)j, (long long)k, x[idx], y[idx], z[idx], phi[idx],
+                    u[idx], v[idx], w[idx], rho[idx], p[idx], T[idx], M[idx]);
             }
         }
     }
 
-    fclose(out);
-    arena_release(arena);
+    if (!file_stream_close(&fs))
+    {
+        fprintf(stderr, "failed to write %s\n", output_filepath);
+        return 1;
+    }
+
+    fprintf(stdout, "\n");
+    arena_release(memory);
+    arena_release(scratch);
 
     return 0;
 }

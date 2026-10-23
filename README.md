@@ -22,7 +22,7 @@ The flow is steady, inviscid, adiabatic and shock-free. It issues from a settlin
 
 $$
 \begin{aligned}
-&\text{continuity:} && \nabla\cdot(\rho\,\mathbf{u}) = 0 \\
+&\text{continuity:} && \nabla\cdot(\rho\mathbf{u}) = 0 \\
 &\text{energy:} && h + \tfrac12 q^2 = h_0 \quad (\text{uniform}) \\
 &\text{isentropic:} && p/\rho^{\gamma} = p_0/\rho_0^{\gamma} \quad (\text{uniform})
 \end{aligned}
@@ -43,7 +43,7 @@ Under these assumptions this is exact, not an approximation.
 Substituting into continuity:
 
 $$
-\frac{\partial}{\partial x}\left(\rho\,\phi_x\right) + \frac{\partial}{\partial y}\left(\rho\,\phi_y\right) + \frac{\partial}{\partial z}\left(\rho\,\phi_z\right) = 0
+\frac{\partial}{\partial x}\left(\rho\phi_x\right) + \frac{\partial}{\partial y}\left(\rho\phi_y\right) + \frac{\partial}{\partial z}\left(\rho\phi_z\right) = 0
 $$
 
 ### Density closure
@@ -51,7 +51,7 @@ $$
 Combining the energy and isentropic relations, with $h = a^2/(\gamma - 1)$, gives the compressible Bernoulli equation. In nondimensional form (§2):
 
 $$
-a^2 = 1 - \frac{\gamma - 1}{2}\, q^2, \qquad
+a^2 = 1 - \frac{\gamma - 1}{2} q^2, \qquad
 \rho = \left(a^2\right)^{\frac{1}{\gamma - 1}} = \left[1 - \frac{\gamma - 1}{2}\left(\phi_x^2 + \phi_y^2 + \phi_z^2\right)\right]^{\frac{1}{\gamma - 1}}
 $$
 
@@ -63,17 +63,17 @@ $$
 
 ### Quasi-linear (expanded) form
 
-Differentiating the closure gives $\nabla\rho = -\dfrac{\rho}{a^2}\,\nabla\!\left(\tfrac12 q^2\right)$. Expanding the conservative form with this, and dividing by $\rho$:
+Differentiating the closure gives $\nabla\rho = -\dfrac{\rho}{a^2}\nabla\!\left(\tfrac12 q^2\right)$. Expanding the conservative form with this, and dividing by $\rho$:
 
 $$
-(a^2 - u^2)\,\phi_{xx} + (a^2 - v^2)\,\phi_{yy} + (a^2 - w^2)\,\phi_{zz}
-- 2uv\,\phi_{xy} - 2vw\,\phi_{yz} - 2uw\,\phi_{xz} = 0
+(a^2 - u^2)\phi_{xx} + (a^2 - v^2)\phi_{yy} + (a^2 - w^2)\phi_{zz}
+- 2uv\phi_{xy} - 2vw\phi_{yz} - 2uw\phi_{xz} = 0
 $$
 
 This form shows the character of the equation. Aligning $x$ with the local velocity reduces it to:
 
 $$
-(1 - M^2)\,\phi_{ss} + \phi_{nn} + \phi_{mm} = 0
+(1 - M^2)\phi_{ss} + \phi_{nn} + \phi_{mm} = 0
 $$
 
 So the equation is **elliptic for $M < 1$**. As $M \to 0$ ($a^2 \gg q^2$) it reduces to Laplace's equation, $\phi_{xx} + \phi_{yy} + \phi_{zz} = 0$.
@@ -91,7 +91,7 @@ The sonic limit, $M = 1 \iff q^2 = 2/(\gamma + 1)$, is checked every iteration. 
 | length | test-section half-height $h_\text{ts}$ |
 | velocity | stagnation speed of sound $a_0$ |
 | $\rho,\ p,\ T$ | $\rho_0,\ p_0,\ T_0$ |
-| $\phi$ | $a_0\, h_\text{ts}$ |
+| $\phi$ | $a_0 h_\text{ts}$ |
 
 The mass flux follows from the target test-section Mach number:
 
@@ -99,7 +99,7 @@ $$
 m'' \equiv \frac{\rho u}{\rho_0 a_0} = M_\text{ts}\left[1 + \frac{\gamma - 1}{2} M_\text{ts}^2\right]^{-\frac{\gamma + 1}{2(\gamma - 1)}}
 $$
 
-The inlet flux is $m''$ scaled by the area ratio, $m''_\text{in} = m''\,A_\text{ts}/A_\text{in}$.
+The inlet flux is $m''$ scaled by the area ratio, $m''_\text{in} = m''A_\text{ts}/A_\text{in}$.
 
 Stagnation conditions are invariant in inviscid flow, so the required inputs are $p_0$, $T_0$, $M_\text{ts}$, $\gamma$ and the wall contours.
 
@@ -123,14 +123,14 @@ The section is symmetric about $y = 0$ and $z = 0$, so only the **quarter domain
 The grid is a single structured block with $i$ streamwise ($\xi$), $j$ vertical ($\eta$) and $k$ spanwise ($\zeta$):
 
 $$
-x_{ijk} = X_i, \qquad y_{ijk} = h(X_i)\, s_j, \qquad z_{ijk} = b(X_i)\, t_k
+x_{ijk} = X_i, \qquad y_{ijk} = h(X_i) s_j, \qquad z_{ijk} = b(X_i) t_k
 $$
 
 - **Streamwise stations $X_i$:** monotone. Use uniform spacing through the contraction and geometric stretching into the extensions.
 - **Cross-stream distributions $s_j$ and $t_k$:** run from 0 on the symmetry plane to 1 at the wall, clustered toward the wall with a tanh stretching:
 
 $$
-s_j = 1 - \frac{\tanh\big(\beta\,(1 - \eta_j)\big)}{\tanh\beta}, \qquad \eta_j = \frac{j}{n_j - 1}
+s_j = 1 - \frac{\tanh\big(\beta(1 - \eta_j)\big)}{\tanh\beta}, \qquad \eta_j = \frac{j}{n_j - 1}
 $$
 
 and likewise for $t_k$ (typically $\beta \approx 1.5$–$2.5$).
@@ -198,10 +198,10 @@ Computational coordinates $(\xi, \eta, \zeta)$ have unit spacing, so $\xi = i$, 
 
 ### General form
 
-With Jacobian $J = \det\,\partial(x,y,z)/\partial(\xi,\eta,\zeta)$ and contravariant metric tensor $g^{mn} = \nabla\xi^m \cdot \nabla\xi^n$, the conservative equation transforms to:
+With Jacobian $J = \det\partial(x,y,z)/\partial(\xi,\eta,\zeta)$ and contravariant metric tensor $g^{mn} = \nabla\xi^m \cdot \nabla\xi^n$, the conservative equation transforms to:
 
 $$
-\frac{\partial}{\partial \xi^m}\left(\rho\, J\, g^{mn}\, \frac{\partial\phi}{\partial \xi^n}\right) = 0
+\frac{\partial}{\partial \xi^m}\left(\rho J g^{mn} \frac{\partial\phi}{\partial \xi^n}\right) = 0
 $$
 
 Written out:
@@ -212,7 +212,7 @@ $$
 + \frac{\partial}{\partial\zeta}\Big(A^{\xi\zeta}\phi_\xi + A^{\eta\zeta}\phi_\eta + A^{\zeta\zeta}\phi_\zeta\Big) = 0
 $$
 
-with $A^{mn} = \rho\, J\, g^{mn}$. The six independent coefficients form a symmetric $3\times 3$ tensor.
+with $A^{mn} = \rho J g^{mn}$. The six independent coefficients form a symmetric $3\times 3$ tensor.
 
 Each bracketed term is the mass flux through a face of constant $\xi$, $\eta$ or $\zeta$ respectively.
 
@@ -223,27 +223,27 @@ The grid's structure makes the Jacobian matrix lower-triangular:
 $$
 \frac{\partial(x,y,z)}{\partial(\xi,\eta,\zeta)} =
 \begin{bmatrix} x_\xi & 0 & 0 \\ y_\xi & y_\eta & 0 \\ z_\xi & 0 & z_\zeta \end{bmatrix},
-\qquad J = x_\xi\, y_\eta\, z_\zeta
+\qquad J = x_\xi y_\eta z_\zeta
 $$
 
 The inverse metrics are:
 
 $$
 \nabla\xi = \left(\frac{1}{x_\xi},\ 0,\ 0\right), \quad
-\nabla\eta = \left(-\frac{y_\xi}{x_\xi\, y_\eta},\ \frac{1}{y_\eta},\ 0\right), \quad
-\nabla\zeta = \left(-\frac{z_\xi}{x_\xi\, z_\zeta},\ 0,\ \frac{1}{z_\zeta}\right)
+\nabla\eta = \left(-\frac{y_\xi}{x_\xi y_\eta},\ \frac{1}{y_\eta},\ 0\right), \quad
+\nabla\zeta = \left(-\frac{z_\xi}{x_\xi z_\zeta},\ 0,\ \frac{1}{z_\zeta}\right)
 $$
 
 so the coefficients are:
 
 $$
 \begin{aligned}
-A^{\xi\xi} &= \rho\,\frac{y_\eta\, z_\zeta}{x_\xi}, &
-A^{\xi\eta} &= -\rho\,\frac{y_\xi\, z_\zeta}{x_\xi}, &
-A^{\xi\zeta} &= -\rho\,\frac{z_\xi\, y_\eta}{x_\xi}, \\[4pt]
-A^{\eta\eta} &= \rho\,\frac{x_\xi\, z_\zeta}{y_\eta}\left(1 + \frac{y_\xi^2}{x_\xi^2}\right), &
-A^{\zeta\zeta} &= \rho\,\frac{x_\xi\, y_\eta}{z_\zeta}\left(1 + \frac{z_\xi^2}{x_\xi^2}\right), &
-A^{\eta\zeta} &= \rho\,\frac{y_\xi\, z_\xi}{x_\xi}
+A^{\xi\xi} &= \rho\frac{y_\eta z_\zeta}{x_\xi}, &
+A^{\xi\eta} &= -\rho\frac{y_\xi z_\zeta}{x_\xi}, &
+A^{\xi\zeta} &= -\rho\frac{z_\xi y_\eta}{x_\xi}, \\[4pt]
+A^{\eta\eta} &= \rho\frac{x_\xi z_\zeta}{y_\eta}\left(1 + \frac{y_\xi^2}{x_\xi^2}\right), &
+A^{\zeta\zeta} &= \rho\frac{x_\xi y_\eta}{z_\zeta}\left(1 + \frac{z_\xi^2}{x_\xi^2}\right), &
+A^{\eta\zeta} &= \rho\frac{y_\xi z_\xi}{x_\xi}
 \end{aligned}
 $$
 
@@ -252,7 +252,7 @@ The off-diagonal terms are driven by the wall slopes $y_\xi$ and $z_\xi$. They v
 ### Physical velocity
 
 $$
-u = \frac{\phi_\xi}{x_\xi} - \frac{y_\xi}{x_\xi\, y_\eta}\,\phi_\eta - \frac{z_\xi}{x_\xi\, z_\zeta}\,\phi_\zeta, \qquad
+u = \frac{\phi_\xi}{x_\xi} - \frac{y_\xi}{x_\xi y_\eta}\phi_\eta - \frac{z_\xi}{x_\xi z_\zeta}\phi_\zeta, \qquad
 v = \frac{\phi_\eta}{y_\eta}, \qquad
 w = \frac{\phi_\zeta}{z_\zeta}
 $$
@@ -261,11 +261,11 @@ $$
 
 For uniform flow $\phi = x$, the derivatives are $\phi_\xi = x_\xi$, $\phi_\eta = \phi_\zeta = 0$. The fluxes then reduce to:
 
-- $\rho\, y_\eta z_\zeta$ through $\xi$-faces;
-- $-\rho\, y_\xi z_\zeta$ through $\eta$-faces;
-- $-\rho\, z_\xi y_\eta$ through $\zeta$-faces.
+- $\rho y_\eta z_\zeta$ through $\xi$-faces;
+- $-\rho y_\xi z_\zeta$ through $\eta$-faces;
+- $-\rho z_\xi y_\eta$ through $\zeta$-faces.
 
-These are exactly $\rho\,\hat{\mathbf{x}}\cdot\mathbf{S}$ for each face area vector. They telescope to zero over each cell *provided* the metrics are computed from the node coordinates with the same difference stencils as $\phi$.
+These are exactly $\rho\hat{\mathbf{x}}\cdot\mathbf{S}$ for each face area vector. They telescope to zero over each cell *provided* the metrics are computed from the node coordinates with the same difference stencils as $\phi$.
 
 > **Metric rule:** never use analytic metrics. Compute $x_\xi, y_\xi, y_\eta, z_\xi, z_\zeta$ from node coordinates with the stencils used for $\phi$.
 
@@ -323,7 +323,7 @@ Every boundary is a grid plane. Nodes on a boundary face, edge or corner own $\t
 |---|---|---|
 | Symmetry | $j = 0$, $k = 0$ | zero face flux, $G_{-\frac12} = 0$, $H_{-\frac12} = 0$ |
 | Walls | $j = n_j - 1$, $k = n_k - 1$ | zero face flux (no penetration) |
-| Inlet | $i = 0$ | prescribed flux $F_{-\frac12} = m''_\text{in}\; y_\eta\, z_\zeta$ (uniform mass flux × face area) |
+| Inlet | $i = 0$ | prescribed flux $F_{-\frac12} = m''_\text{in}\; y_\eta z_\zeta$ (uniform mass flux × face area) |
 | Outlet | $i = n_i - 1$ | Dirichlet $\phi = 0$ (uniform flow normal to the outlet plane; also fixes the datum) |
 
 ---
