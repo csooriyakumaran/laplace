@@ -8,6 +8,16 @@ extern "C"
 
 #include <stdint.h>
 
+#define LAPLACE_MAGIC 0x4C41504C41434500ULL
+#define LAPLACE_VERSION 1ULL
+
+typedef struct LaplaceHeader
+{
+    uint64_t magic;
+    uint64_t version;
+    int64_t  ni, nj, nk;
+} LaplaceHeader;
+
 static inline int64_t laplace_idx(int64_t i, int64_t j, int64_t k, int64_t nj, int64_t nk) { return j + nj * ( k + nk * i); }
 
 /*
